@@ -168,7 +168,7 @@ class KubernetesContainerManager(ContainerManager):
         self._k8s_v1 = client.CoreV1Api()
         self._k8s_beta = client.ExtensionsV1beta1Api()
         self._k8s_rbac = client.RbacAuthorizationV1beta1Api()
-        
+
 
         # Create the template engine
         # Config: Any variable missing -> Error
@@ -424,9 +424,10 @@ class KubernetesContainerManager(ContainerManager):
             if len(external_node_hosts) == 0 and self.useInternalIP:
                 msg = "No external node addresses found. Using Internal IP address"
                 self.logger.warning(msg)
-                for addr in node.status.addresses:
-                    if addr.type == "InternalIP":
-                        external_node_hosts.append(addr.address)
+                for node in nodes.items:
+                    for addr in node.status.addresses:
+                        if addr.type == "InternalIP":
+                            external_node_hosts.append(addr.address)
 
             if len(external_node_hosts) == 0:
                 msg = "Error connecting to Kubernetes cluster. No external node addresses found. You may pass in KubernetesContainerManager(useInternalIP=True) to connect to local Kubernetes cluster"
@@ -624,14 +625,24 @@ class KubernetesContainerManager(ContainerManager):
         try:
             for m in models:
                 for v in models[m]:
+                    label_selector="{label}={val}, {cluster_label}={cluster_name}".format(
+                        label=CLIPPER_MODEL_CONTAINER_LABEL,
+                        val=create_model_container_label(m, v),
+                        cluster_label=CLIPPER_DOCKER_LABEL,
+                        cluster_name=self.cluster_name)
+
                     self._k8s_beta.delete_collection_namespaced_deployment(
                         namespace=self.k8s_namespace,
-                        label_selector=
-                        "{label}={val}, {cluster_label}={cluster_name}".format(
-                            label=CLIPPER_MODEL_CONTAINER_LABEL,
-                            val=create_model_container_label(m, v),
-                            cluster_label=CLIPPER_DOCKER_LABEL,
-                            cluster_name=self.cluster_name))
+                        label_selector=label_selector)
+
+                    self._k8s_beta.delete_collection_namespaced_replica_set(
+                        namespace=self.k8s_namespace,
+                        label_selector=label_selector)
+
+                    self._k8s_v1.delete_collection_namespaced_pod(
+                        namespace=self.k8s_namespace,
+                        label_selector=label_selector)
+
         except ApiException as e:
             self.logger.warning(
                 "Exception deleting kubernetes deployments: {}".format(e))
@@ -639,13 +650,23 @@ class KubernetesContainerManager(ContainerManager):
 
     def stop_all_model_containers(self):
         try:
+            label_selector="{label}, {cluster_label}={cluster_name}".format(
+                label=CLIPPER_MODEL_CONTAINER_LABEL,
+                cluster_label=CLIPPER_DOCKER_LABEL,
+                cluster_name=self.cluster_name)
+
             self._k8s_beta.delete_collection_namespaced_deployment(
                 namespace=self.k8s_namespace,
-                label_selector="{label}, {cluster_label}={cluster_name}".
-                format(
-                    label=CLIPPER_MODEL_CONTAINER_LABEL,
-                    cluster_label=CLIPPER_DOCKER_LABEL,
-                    cluster_name=self.cluster_name))
+                label_selector=label_selector)
+
+            self._k8s_beta.delete_collection_namespaced_replica_set(
+                namespace=self.k8s_namespace,
+                label_selector=label_selector)
+
+            self._k8s_v1.delete_collection_namespaced_pod(
+                namespace=self.k8s_namespace,
+                label_selector=label_selector)
+
         except ApiException as e:
             self.logger.warning(
                 "Exception deleting kubernetes deployments: {}".format(e))
